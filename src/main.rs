@@ -14,7 +14,7 @@ use std::{
 #[derive(Parser, Debug)]
 #[command(name = "clipd")]
 #[command(version = "0.1")]
-#[command(about = "clipboard manager tui for wayland", long_about = None)]
+#[command(about = "clipboard manager gui for wayland", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -61,7 +61,7 @@ fn main() -> Result<()> {
         Commands::Watch => watch_clipboard(),
 
         Commands::List { limit } => {
-            let clipboard_entires = list_entries(conn, limit)?;
+            let clipboard_entires = list_entries(&conn, limit)?;
             for (i, entry) in clipboard_entires.iter().enumerate() {
                 println!(
                     "{}. [id {}] [timestamp {}]\n{}",
@@ -84,16 +84,16 @@ fn main() -> Result<()> {
                 }
             };
 
-            store_entry(conn, content)?;
+            store_entry(&conn, content)?;
             Ok(())
         }
 
-        Commands::Select { id } => select_entry(conn, id),
+        Commands::Select { id } => select_entry(&conn, id),
 
         Commands::Delete { id } => delete_entry(&conn, id),
 
         Commands::Clear => {
-            clear_db(conn)?;
+            clear_db(&conn)?;
             Ok(())
         }
     }

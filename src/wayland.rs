@@ -27,13 +27,13 @@ pub fn initialize_db(db_path: &str) -> Result<Connection> {
     Ok(conn)
 }
 
-pub fn store_entry(conn: Connection, data: String) -> Result<i64> {
+pub fn store_entry(conn: &Connection, data: String) -> Result<i64> {
     conn.execute("INSERT INTO clipd (data) VALUES (?1)", params![data])?;
 
     Ok(conn.last_insert_rowid())
 }
 
-pub fn list_entries(conn: Connection, limit: i64) -> Result<Vec<ClipboardEntry>> {
+pub fn list_entries(conn: &Connection, limit: i64) -> Result<Vec<ClipboardEntry>> {
     let mut stmt = conn.prepare(
         "SELECT id, data, timestamp
         FROM clipd 
@@ -57,7 +57,7 @@ pub fn list_entries(conn: Connection, limit: i64) -> Result<Vec<ClipboardEntry>>
     Ok(clipboard_entries)
 }
 
-pub fn select_entry(conn: Connection, id: i64) -> anyhow::Result<()> {
+pub fn select_entry(conn: &Connection, id: i64) -> anyhow::Result<()> {
     let data: Option<String> = conn
         .query_row("SELECT data FROM clipd WHERE id = ?1", params![id], |row| {
             row.get(0)
@@ -86,7 +86,7 @@ pub fn delete_entry(conn: &Connection, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn clear_db(conn: Connection) -> Result<()> {
+pub fn clear_db(conn: &Connection) -> Result<()> {
     conn.execute("DELETE FROM clipd", ())?;
     Ok(())
 }
@@ -117,12 +117,96 @@ mod tests {
         conn.execute(
             "CREATE TABLE clipd (
                 id INTEGER PRIMARY KEY,
-                data TEXT
+                data TEXT NOT NULL,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
             )",
             (),
         )
         .expect("create clipd table");
         conn
+    }
+
+    #[test]
+    fn store_entry_stores_data_and_returns_id() {
+        let conn = test_db();
+        let id = store_entry(&conn, "hello world".to_string()).expect("store entry");
+
+        let data: String = conn
+            .query_row("SELECT data FROM clipd WHERE id = ?1", params![id], |row| {
+                row.get(0)
+            })
+            .expect("find entry using returned it");
+
+        assert_eq!(data, "hello world");
+    }
+
+    #[test]
+    fn list_entries_returns_newest_first() {
+        let conn = test_db();
+
+        store_entry(&conn, "first entry".to_string()).expect("stores first entry");
+        store_entry(&conn, "second entry".to_string()).expect("stores second entry");
+        store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+
+        let entries = list_entries(&conn, 5).expect("list entries");
+
+        assert_eq!(entries.len(), 3);
+
+        assert_eq!(entries[0].data, "third entry");
+        assert_eq!(entries[1].data, "second entry");
+        assert_eq!(entries[2].data, "first entry");
+
+        assert!(entries[0].id > entries[1].id);
+        assert!(entries[1].id > entries[2].id);
+    }
+
+    #[test]
+    fn list_entries_respects_limit() {
+        let conn = test_db();
+
+        store_entry(&conn, "first entry".to_string()).expect("stores first entry");
+        store_entry(&conn, "second entry".to_string()).expect("stores second entry");
+        store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+
+        let entries = list_entries(&conn, 2).expect("list entries");
+
+        assert_eq!(entries.len(), 2);
+
+        assert_eq!(entries[0].data, "third entry");
+        assert_eq!(entries[1].data, "second entry");
+
+        assert!(entries[0].id > entries[1].id);
+    }
+
+    #[test]
+    fn clear_db_removes_all_entries() {
+        let conn = test_db();
+        let data = vec!["blue", "red", "orange", "yellow", "purple"];
+        for item in data.iter() {
+            store_entry(&conn, item.to_string()).expect("insert into database");
+        }
+
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM clipd", (), |row| row.get::<_, i64>(0))
+                .expect("count entries") as usize,
+            data.len()
+        );
+
+        clear_db(&conn).expect("clear database");
+
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM clipd", (), |row| row.get::<_, i64>(0))
+                .expect("count entries"),
+            0
+        );
+    }
+
+    #[test]
+    fn select_entry_errors_for_missing_id() {
+        let conn = test_db();
+        let error = select_entry(&conn, 69).expect_err("cannot select missing entry");
+
+        assert_eq!(error.to_string(), "no clipboard entry with id: 69");
     }
 
     #[test]
@@ -144,7 +228,7 @@ mod tests {
     #[test]
     fn delete_entry_errors_for_missing_id() {
         let conn = test_db();
-        let error = delete_entry(&conn, 42).expect_err("missing entry should fail");
+        let error = delete_entry(&conn, 42).expect_err("cannot delete missing entry");
 
         assert_eq!(error.to_string(), "no clipboard entry with id: 42");
     }
