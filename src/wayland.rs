@@ -8,6 +8,7 @@ use std::{env, process::Command};
 pub struct ClipboardEntry {
     pub id: i64,
     pub data: String,
+    pub timestamp: String,
 }
 
 pub fn initialize_db(db_path: &str) -> Result<Connection> {
@@ -16,7 +17,8 @@ pub fn initialize_db(db_path: &str) -> Result<Connection> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS clipd (
         id INTEGER PRIMARY KEY,
-        data TEXT
+        data TEXT NOT NULL,
+        timestamp TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     )
     ",
         (),
@@ -33,7 +35,7 @@ pub fn store_entry(conn: Connection, data: String) -> Result<i64> {
 
 pub fn list_entries(conn: Connection, limit: i64) -> Result<Vec<ClipboardEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT id, data 
+        "SELECT id, data, timestamp
         FROM clipd 
         ORDER BY id DESC 
         LIMIT ?1",
@@ -43,6 +45,7 @@ pub fn list_entries(conn: Connection, limit: i64) -> Result<Vec<ClipboardEntry>>
         Ok(ClipboardEntry {
             id: row.get(0)?,
             data: row.get(1)?,
+            timestamp: row.get(2)?,
         })
     })?;
 

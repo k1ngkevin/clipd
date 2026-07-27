@@ -63,7 +63,13 @@ fn main() -> Result<()> {
         Commands::List { limit } => {
             let clipboard_entires = list_entries(conn, limit)?;
             for (i, entry) in clipboard_entires.iter().enumerate() {
-                println!("{}. [id {}] {}", i + 1, entry.id, entry.data);
+                println!(
+                    "{}. [id {}] [timestamp {}]\n{}",
+                    i + 1,
+                    entry.id,
+                    entry.timestamp,
+                    entry.data
+                );
             }
             Ok(())
         }
