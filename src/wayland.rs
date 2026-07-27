@@ -1,8 +1,11 @@
 use anyhow::Context;
 use rusqlite::{Connection, OptionalExtension, Result, params};
-use std::io::Write;
-use std::process::Stdio;
-use std::{env, process::Command};
+use std::{
+    io::Write,
+    os::unix::fs::PermissionsExt,
+    process::{Command, Stdio},
+    {env, fs},
+};
 
 #[derive(Debug)]
 pub struct ClipboardEntry {
@@ -23,6 +26,10 @@ pub fn initialize_db(db_path: &str) -> Result<Connection> {
     ",
         (),
     )?;
+
+    if let Err(err) = fs::set_permissions(&db_path, fs::Permissions::from_mode(0o600)) {
+        eprintln!("failed to set 0600 permissions on database file: {}", err);
+    }
 
     Ok(conn)
 }

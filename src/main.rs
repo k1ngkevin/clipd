@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 use std::{
     fs,
     io::{self, Read},
+    os::unix::fs::PermissionsExt,
     path::PathBuf,
 };
 
@@ -48,7 +49,7 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    let db_path = find_and_create_db()?;
+    let db_path = find_or_create_db()?;
 
     let db_path = db_path
         .to_str()
@@ -99,11 +100,19 @@ fn main() -> Result<()> {
     }
 }
 
-pub fn find_and_create_db() -> Result<PathBuf> {
+pub fn find_or_create_db() -> Result<PathBuf> {
     let mut path = dirs::config_dir().context("error finding home directory")?;
     path.push("clipd");
 
     fs::create_dir_all(&path).context("failed to create clipboard database")?;
+
+    if let Err(err) = fs::set_permissions(&path, fs::Permissions::from_mode(0o700)) {
+        eprintln!(
+            "failed to set 0700 permissions on database directory: {}",
+            err
+        );
+    }
+
     path.push("clipd_history.db");
 
     Ok(path)
