@@ -40,13 +40,8 @@ impl ClipboardColors {
     }
 }
 
-impl ClipboardEntry {
-    const fn ref_array(&self) -> [&String; 2] {
-        [&self.data, &self.timestamp]
-    }
-}
-
-const ITEM_HEIGHT: usize = 5;
+const ITEM_HEIGHT: usize = 3;
+const MAX_ITEM_PREVIEW_LEN: usize = 50;
 
 pub struct App<'a> {
     connection: &'a Connection,
@@ -152,16 +147,27 @@ impl<'a> App<'a> {
             .style(header_style)
             .height(1);
 
-        let rows = self.items.iter().map(|data| {
-            let color = self.colors.normal_row_color;
+        let rows = self.items.iter().map(|entry| {
+            let mut entry_preview: String = entry
+                .data
+                .chars()
+                .take(MAX_ITEM_PREVIEW_LEN)
+                .collect::<String>()
+                .replace('\n', "\\n");
 
-            let item = data.ref_array();
+            if entry.data.len() >= MAX_ITEM_PREVIEW_LEN {
+                entry_preview.replace_range(47..50, "...");
+            }
 
-            item.into_iter()
-                .map(|content| Cell::from(Text::from(format!("\n{content}\n"))))
-                .collect::<Row>()
-                .style(Style::new().fg(self.colors.row_fg).bg(color))
-                .height(5)
+            let content = format!("\n{}\n{}\n", entry_preview, entry.timestamp);
+
+            Row::new([Cell::from(Text::from(content))])
+                .style(
+                    Style::new()
+                        .fg(self.colors.row_fg)
+                        .bg(self.colors.normal_row_color),
+                )
+                .height(ITEM_HEIGHT as u16)
         });
 
         let bar = " █ ";
