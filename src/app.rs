@@ -1,4 +1,4 @@
-use crate::wayland::{ClipboardEntry, count_entries, list_entries, select_entry};
+use crate::wayland::{ClipboardEntry, count_entries, delete_entry, list_entries, select_entry};
 use crossterm::event::{self, KeyCode};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::palette::tailwind;
@@ -93,6 +93,17 @@ impl<'a> App<'a> {
         self.scroll_state = self.scroll_state.position(i * ITEM_HEIGHT);
     }
 
+    pub fn delete_row(&mut self) -> anyhow::Result<()> {
+        let idx = self.state.selected().expect("item index");
+        let id = self.items[idx].id;
+
+        if let Some(index) = self.items.iter().position(|item| item.id == id) {
+            self.items.remove(index);
+        }
+
+        delete_entry(self.connection, id)
+    }
+
     pub fn save_row_to_clipboard(&mut self) -> anyhow::Result<()> {
         let idx = self.state.selected().expect("item index");
         let id = self.items[idx].id;
@@ -112,6 +123,7 @@ impl<'a> App<'a> {
                         self.save_row_to_clipboard()?;
                         return Ok(());
                     }
+                    KeyCode::Backspace => self.delete_row()?,
                     _ => {}
                 }
             }
