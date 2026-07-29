@@ -1,9 +1,11 @@
+pub mod app;
 pub mod wayland;
 
 use crate::wayland::{
     clear_db, delete_entry, initialize_db, list_entries, select_entry, store_entry, watch_clipboard,
 };
 use anyhow::{Context, Ok, Result};
+use app::App;
 use clap::{Parser, Subcommand};
 use std::{
     fs,
@@ -18,7 +20,7 @@ use std::{
 #[command(about = "clipboard manager gui for wayland", long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -58,10 +60,12 @@ fn main() -> Result<()> {
     let conn = initialize_db(&db_path)?;
 
     let cli = Cli::parse();
-    match cli.command {
-        Commands::Watch => watch_clipboard(),
 
-        Commands::List { limit } => {
+    match cli.command {
+        None => ratatui::run(|terminal| App::new(&conn).run(terminal)),
+        Some(Commands::Watch) => watch_clipboard(),
+
+        Some(Commands::List { limit }) => {
             let clipboard_entires = list_entries(&conn, limit)?;
             for (i, entry) in clipboard_entires.iter().enumerate() {
                 println!(
@@ -75,7 +79,7 @@ fn main() -> Result<()> {
             Ok(())
         }
 
-        Commands::Store { content } => {
+        Some(Commands::Store { content }) => {
             let content = match content {
                 Some(content) => content,
                 None => {
@@ -89,11 +93,11 @@ fn main() -> Result<()> {
             Ok(())
         }
 
-        Commands::Select { id } => select_entry(&conn, id),
+        Some(Commands::Select { id }) => select_entry(&conn, id),
 
-        Commands::Delete { id } => delete_entry(&conn, id),
+        Some(Commands::Delete { id }) => delete_entry(&conn, id),
 
-        Commands::Clear => {
+        Some(Commands::Clear) => {
             clear_db(&conn)?;
             Ok(())
         }

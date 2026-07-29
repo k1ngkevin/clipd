@@ -64,6 +64,18 @@ pub fn list_entries(conn: &Connection, limit: i64) -> Result<Vec<ClipboardEntry>
     Ok(clipboard_entries)
 }
 
+pub fn count_entries(conn: &Connection) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "
+    SELECT COUNT(*) from clipd 
+    ",
+        [],
+        |row| row.get(0),
+    )?;
+
+    Ok(count)
+}
+
 pub fn select_entry(conn: &Connection, id: i64) -> anyhow::Result<()> {
     let data: Option<String> = conn
         .query_row("SELECT data FROM clipd WHERE id = ?1", params![id], |row| {
