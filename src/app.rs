@@ -19,7 +19,6 @@ struct ClipboardColors {
     header_bg: Color,
     header_fg: Color,
     row_fg: Color,
-    selected_row_style_fg: Color,
     selected_column_style_fg: Color,
     selected_cell_style_fg: Color,
     normal_row_color: Color,
@@ -32,9 +31,8 @@ impl ClipboardColors {
             header_bg: color.c900,
             header_fg: tailwind::SLATE.c200,
             row_fg: tailwind::SLATE.c200,
-            selected_row_style_fg: color.c400,
             selected_column_style_fg: color.c400,
-            selected_cell_style_fg: color.c600,
+            selected_cell_style_fg: color.c400,
             normal_row_color: tailwind::SLATE.c950,
         }
     }
@@ -110,7 +108,10 @@ impl<'a> App<'a> {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     KeyCode::Char('j') | KeyCode::Down => self.next_row(),
                     KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
-                    KeyCode::Enter => self.save_row_to_clipboard()?,
+                    KeyCode::Enter => {
+                        self.save_row_to_clipboard()?;
+                        return Ok(());
+                    }
                     _ => {}
                 }
             }
@@ -130,9 +131,7 @@ impl<'a> App<'a> {
             .fg(self.colors.header_fg)
             .bg(self.colors.header_bg);
 
-        let selected_row_style = Style::default()
-            .add_modifier(Modifier::REVERSED)
-            .fg(self.colors.selected_row_style_fg);
+        let selected_row_style = Style::default().bg(self.colors.selected_cell_style_fg);
 
         let selected_col_style = Style::default().fg(self.colors.selected_column_style_fg);
 
@@ -159,7 +158,7 @@ impl<'a> App<'a> {
                 entry_preview.replace_range(47..50, "...");
             }
 
-            let content = format!("\n{}\n{}\n", entry_preview, entry.timestamp);
+            let content = format!("{}\n{}", entry_preview, entry.timestamp);
 
             Row::new([Cell::from(Text::from(content))])
                 .style(
@@ -170,19 +169,11 @@ impl<'a> App<'a> {
                 .height(ITEM_HEIGHT as u16)
         });
 
-        let bar = " █ ";
-
         let table = Table::new(rows, [50])
             .header(header)
             .row_highlight_style(selected_row_style)
             .column_highlight_style(selected_col_style)
             .cell_highlight_style(selected_cell_style)
-            .highlight_symbol(Text::from(vec![
-                "".into(),
-                bar.into(),
-                bar.into(),
-                "".into(),
-            ]))
             .bg(self.colors.buffer_bg)
             .highlight_spacing(HighlightSpacing::Always);
 
