@@ -7,7 +7,7 @@ use ratatui::{
     DefaultTerminal, Frame,
     layout::{Margin, Rect},
     style::{Color, Modifier, Style},
-    text::Text,
+    text::{Line, Span, Text},
 };
 
 use ratatui::widgets::{
@@ -221,7 +221,13 @@ impl<'a> App<'a> {
                 entry_preview.replace_range(47..50, "...");
             }
 
-            let content = format!("{}\n{}", entry_preview, entry.timestamp);
+            let content = Text::from(vec![
+                Line::from(entry_preview),
+                Line::from(Span::styled(
+                    entry.timestamp.to_string(),
+                    Style::new().fg(Color::DarkGray),
+                )),
+            ]);
 
             Row::new([Cell::from(Text::from(content))])
                 .style(Style::new().fg(self.colors.row_fg))
