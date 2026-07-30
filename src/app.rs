@@ -12,7 +12,8 @@ use ratatui::{
 };
 
 use ratatui::widgets::{
-    Cell, HighlightSpacing, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, TableState,
+    Block, BorderType, Cell, HighlightSpacing, Paragraph, Row, Scrollbar, ScrollbarOrientation,
+    ScrollbarState, Table, TableState, Wrap,
 };
 use rusqlite::Connection;
 
@@ -48,6 +49,8 @@ pub struct App<'a> {
     items: Vec<ClipboardEntry>,
     state: TableState,
     scroll_state: ScrollbarState,
+    preview_state: bool,
+    preview_scroll: u16,
     colors: ClipboardColors,
 }
 
@@ -61,6 +64,8 @@ impl<'a> App<'a> {
             items: clipboard_data.expect("clipboard data"),
             state: TableState::default().with_selected(0),
             scroll_state: ScrollbarState::new(clipboard_len as usize * ITEM_HEIGHT),
+            preview_state: false,
+            preview_scroll: 0,
             colors: ClipboardColors::new(&tailwind::BLUE),
         }
     }
@@ -119,21 +124,52 @@ impl<'a> App<'a> {
         Ok(())
     }
 
+    pub fn preview_scroll_down(&mut self) {
+        self.preview_scroll = self.preview_scroll.saturating_add(1);
+    }
+
+    pub fn preview_scroll_up(&mut self) {
+        self.preview_scroll = self.preview_scroll.saturating_sub(1);
+    }
+
     pub fn run(mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         loop {
-            terminal.draw(|frame| self.render(frame))?;
+            if self.preview_state {
+                terminal.draw(|frame| self.render_item_preview(frame, frame.area()))?;
 
-            if let Some(key) = event::read()?.as_key_press_event() {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Char('j') | KeyCode::Down => self.next_row(),
-                    KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
-                    KeyCode::Enter => {
-                        self.save_row_to_clipboard()?;
-                        return Ok(());
+                if let Some(key) = event::read()?.as_key_press_event() {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Char('j') | KeyCode::Down => self.preview_scroll_down(),
+                        KeyCode::Char('k') | KeyCode::Up => self.preview_scroll_up(),
+                        KeyCode::Enter => {
+                            self.save_row_to_clipboard()?;
+                            return Ok(());
+                        }
+                        KeyCode::Char(' ') => {
+                            self.preview_state = !self.preview_state;
+                        }
+                        _ => {}
                     }
-                    KeyCode::Backspace => self.delete_row()?,
-                    _ => {}
+                }
+            } else {
+                terminal.draw(|frame| self.render(frame))?;
+
+                if let Some(key) = event::read()?.as_key_press_event() {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                        KeyCode::Char('j') | KeyCode::Down => self.next_row(),
+                        KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
+                        KeyCode::Enter => {
+                            self.save_row_to_clipboard()?;
+                            return Ok(());
+                        }
+                        KeyCode::Backspace => self.delete_row()?,
+                        KeyCode::Char(' ') => {
+                            self.preview_state = !self.preview_state;
+                        }
+                        _ => {}
+                    }
                 }
             }
         }
@@ -213,5 +249,21 @@ impl<'a> App<'a> {
             }),
             &mut self.scroll_state,
         );
+    }
+
+    fn render_item_preview(&mut self, frame: &mut Frame, area: Rect) {
+        let idx = self.state.selected().expect("get item index");
+        let item = self.items[idx].data.as_str();
+        let text = Paragraph::new(item)
+            .block(
+                Block::bordered()
+                    .border_type(BorderType::Rounded)
+                    .border_style(self.colors.selected_cell_style_fg)
+                    .title("item preview"),
+            )
+            .wrap(Wrap { trim: true })
+            .scroll((self.preview_scroll, 0));
+
+        frame.render_widget(text, area);
     }
 }
