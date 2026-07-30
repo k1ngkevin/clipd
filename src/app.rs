@@ -2,12 +2,11 @@ use crate::wayland::{
     ClipboardEntry, count_entries, delete_entry, list_entries, promote_entry, select_entry,
 };
 use crossterm::event::{self, KeyCode};
-use ratatui::layout::{Constraint, Layout};
 use ratatui::style::palette::tailwind;
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Margin, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Modifier, Style},
     text::Text,
 };
 
@@ -18,25 +17,21 @@ use ratatui::widgets::{
 use rusqlite::Connection;
 
 struct ClipboardColors {
-    buffer_bg: Color,
     header_bg: Color,
     header_fg: Color,
     row_fg: Color,
     selected_column_style_fg: Color,
     selected_cell_style_fg: Color,
-    normal_row_color: Color,
 }
 
 impl ClipboardColors {
     const fn new(color: &tailwind::Palette) -> Self {
         Self {
-            buffer_bg: tailwind::SLATE.c950,
             header_bg: color.c900,
             header_fg: tailwind::SLATE.c200,
             row_fg: tailwind::SLATE.c200,
             selected_column_style_fg: color.c400,
             selected_cell_style_fg: color.c400,
-            normal_row_color: tailwind::SLATE.c950,
         }
     }
 }
@@ -188,11 +183,10 @@ impl<'a> App<'a> {
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        let layout = Layout::vertical([Constraint::Min(5), Constraint::Length(4)]);
-        let rects = frame.area().layout_vec(&layout);
+        let area = frame.area();
 
-        self.render_table(frame, rects[0]);
-        self.render_scrollbar(frame, rects[0]);
+        self.render_table(frame, area);
+        self.render_scrollbar(frame, area);
     }
 
     fn render_table(&mut self, frame: &mut Frame, area: Rect) {
@@ -230,21 +224,20 @@ impl<'a> App<'a> {
             let content = format!("{}\n{}", entry_preview, entry.timestamp);
 
             Row::new([Cell::from(Text::from(content))])
-                .style(
-                    Style::new()
-                        .fg(self.colors.row_fg)
-                        .bg(self.colors.normal_row_color),
-                )
+                .style(Style::new().fg(self.colors.row_fg))
                 .height(ITEM_HEIGHT as u16)
         });
+
+        let footer_text = "↑/↓ up/down • ⤶ copy • ⌫ delete • ␣ preview";
+        let footer = Row::new([footer_text]).top_margin(2);
 
         let table = Table::new(rows, [50])
             .header(header)
             .row_highlight_style(selected_row_style)
             .column_highlight_style(selected_col_style)
             .cell_highlight_style(selected_cell_style)
-            .bg(self.colors.buffer_bg)
-            .highlight_spacing(HighlightSpacing::Always);
+            .highlight_spacing(HighlightSpacing::Always)
+            .footer(footer);
 
         frame.render_stateful_widget(table, area, &mut self.state);
     }
@@ -266,10 +259,14 @@ impl<'a> App<'a> {
     fn render_item_preview(&mut self, frame: &mut Frame, area: Rect) {
         let idx = self.state.selected().expect("get item index");
         let item = self.items[idx].data.as_str();
+
+        let footer_text = "↑/↓ up/down • ␣ exit preview";
         let block = Block::bordered()
             .border_type(BorderType::Rounded)
             .border_style(self.colors.selected_cell_style_fg)
-            .title("item preview");
+            .title("item preview")
+            .title_bottom(footer_text);
+
         let inner_area = block.inner(area);
         let text = Paragraph::new(item).wrap(Wrap { trim: true });
 
