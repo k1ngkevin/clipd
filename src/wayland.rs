@@ -7,7 +7,7 @@ use std::{
     {env, fs},
 };
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ClipboardEntry {
     pub id: i64,
     pub data: String,
@@ -20,6 +20,7 @@ pub fn initialize_db(db_path: &str) -> Result<Connection> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS clipd (
         id INTEGER PRIMARY KEY,
+        sort_order INTEGER NOT NULL DEFAULT 0,
         data TEXT NOT NULL,
         timestamp TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
     )
@@ -35,16 +36,43 @@ pub fn initialize_db(db_path: &str) -> Result<Connection> {
 }
 
 pub fn store_entry(conn: &Connection, data: String) -> Result<i64> {
-    conn.execute("INSERT INTO clipd (data) VALUES (?1)", params![data])?;
+    conn.execute(
+        "INSERT INTO clipd 
+        (sort_order, data) 
+        VALUES (
+        (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM clipd), 
+        ?1
+        )",
+        params![data],
+    )?;
 
     Ok(conn.last_insert_rowid())
+}
+
+pub fn promote_entry(conn: &Connection, id: i64) -> anyhow::Result<()> {
+    let updated = conn.execute(
+        "UPDATE clipd
+        SET sort_order = (
+            SELECT COALESCE(MAX(sort_order), 0) + 1
+            FROM clipd
+        )
+        WHERE id = ?1
+        ",
+        params![id],
+    )?;
+
+    if updated == 0 {
+        anyhow::bail!("no clipboard entry with id: {id}");
+    }
+
+    Ok(())
 }
 
 pub fn list_entries(conn: &Connection, limit: i64) -> Result<Vec<ClipboardEntry>> {
     let mut stmt = conn.prepare(
         "SELECT id, data, timestamp
         FROM clipd 
-        ORDER BY id DESC 
+        ORDER BY sort_order DESC, id DESC 
         LIMIT ?1",
     )?;
 
@@ -136,6 +164,7 @@ mod tests {
         conn.execute(
             "CREATE TABLE clipd (
                 id INTEGER PRIMARY KEY,
+                sort_order INTEGER NOT NULL DEFAULT 0,    
                 data TEXT NOT NULL,
                 timestamp TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
             )",
@@ -154,9 +183,86 @@ mod tests {
             .query_row("SELECT data FROM clipd WHERE id = ?1", params![id], |row| {
                 row.get(0)
             })
-            .expect("find entry using returned it");
+            .expect("find entry using returned id");
 
         assert_eq!(data, "hello world");
+    }
+    #[test]
+    fn store_entry_assigns_highest_sort_order() {
+        let conn = test_db();
+
+        let first_id = store_entry(&conn, "first entry".to_string()).expect("stores first entry");
+        let second_id =
+            store_entry(&conn, "second entry".to_string()).expect("stores second entry");
+        let third_id = store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+
+        let first_order: i64 = conn
+            .query_row(
+                "SELECT sort_order FROM clipd WHERE id = ?1",
+                [first_id],
+                |row| row.get(0),
+            )
+            .expect("find sort_order using id");
+
+        let second_order: i64 = conn
+            .query_row(
+                "SELECT sort_order FROM clipd WHERE id = ?1",
+                [second_id],
+                |row| row.get(0),
+            )
+            .expect("find sort_order using id");
+
+        let third_order: i64 = conn
+            .query_row(
+                "SELECT sort_order FROM clipd WHERE id = ?1",
+                [third_id],
+                |row| row.get(0),
+            )
+            .expect("find sort_order using id");
+
+        assert_eq!(first_order, 1);
+        assert_eq!(second_order, 2);
+        assert_eq!(third_order, 3);
+    }
+
+    #[test]
+    fn promote_entries_assigns_highest() {
+        let conn = test_db();
+
+        let first_id = store_entry(&conn, "first entry".to_string()).expect("stores first entry");
+        let second_id =
+            store_entry(&conn, "second entry".to_string()).expect("stores second entry");
+        let third_id = store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+
+        promote_entry(&conn, first_id).expect("promotes entry");
+
+        let first_order: i64 = conn
+            .query_row(
+                "SELECT sort_order FROM clipd WHERE id = ?1",
+                [first_id],
+                |row| row.get(0),
+            )
+            .expect("find sort_order using id");
+
+        let second_order: i64 = conn
+            .query_row(
+                "SELECT sort_order FROM clipd WHERE id = ?1",
+                [second_id],
+                |row| row.get(0),
+            )
+            .expect("find sort_order using id");
+
+        let third_order: i64 = conn
+            .query_row(
+                "SELECT sort_order FROM clipd WHERE id = ?1",
+                [third_id],
+                |row| row.get(0),
+            )
+            .expect("find sort_order using id");
+
+        assert!(first_order > second_order);
+        assert!(first_order > third_order);
+        assert!(third_order > second_order);
     }
 
     #[test]
@@ -177,6 +283,24 @@ mod tests {
 
         assert!(entries[0].id > entries[1].id);
         assert!(entries[1].id > entries[2].id);
+    }
+
+    #[test]
+    fn list_entries_returns_highest_order() {
+        let conn = test_db();
+
+        let first_id = store_entry(&conn, "first entry".to_string()).expect("stores first entry");
+        store_entry(&conn, "second entry".to_string()).expect("stores second entry");
+        store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+
+        promote_entry(&conn, first_id).expect("promotes entry");
+
+        let entries = list_entries(&conn, 5).expect("list entries");
+        assert_eq!(entries.len(), 3);
+
+        assert_eq!(entries[0].data, "first entry");
+        assert_eq!(entries[1].data, "third entry");
+        assert_eq!(entries[2].data, "second entry");
     }
 
     #[test]
@@ -224,6 +348,14 @@ mod tests {
     fn select_entry_errors_for_missing_id() {
         let conn = test_db();
         let error = select_entry(&conn, 69).expect_err("cannot select missing entry");
+
+        assert_eq!(error.to_string(), "no clipboard entry with id: 69");
+    }
+
+    #[test]
+    fn promote_entry_errors_for_missing_id() {
+        let conn = test_db();
+        let error = promote_entry(&conn, 69).expect_err("cannot promote missing entry");
 
         assert_eq!(error.to_string(), "no clipboard entry with id: 69");
     }

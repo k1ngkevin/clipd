@@ -1,4 +1,6 @@
-use crate::wayland::{ClipboardEntry, count_entries, delete_entry, list_entries, select_entry};
+use crate::wayland::{
+    ClipboardEntry, count_entries, delete_entry, list_entries, promote_entry, select_entry,
+};
 use crossterm::event::{self, KeyCode};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::palette::tailwind;
@@ -97,17 +99,24 @@ impl<'a> App<'a> {
         let idx = self.state.selected().expect("item index");
         let id = self.items[idx].id;
 
-        if let Some(index) = self.items.iter().position(|item| item.id == id) {
-            self.items.remove(index);
-        }
+        self.items.remove(idx);
+        delete_entry(self.connection, id)?;
 
-        delete_entry(self.connection, id)
+        Ok(())
     }
 
     pub fn save_row_to_clipboard(&mut self) -> anyhow::Result<()> {
         let idx = self.state.selected().expect("item index");
+
         let id = self.items[idx].id;
-        select_entry(self.connection, id)
+        select_entry(self.connection, id)?;
+        promote_entry(self.connection, id)?;
+
+        let item = self.items[idx].clone();
+        self.items.remove(idx);
+        self.items.insert(0, item);
+
+        Ok(())
     }
 
     pub fn run(mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
