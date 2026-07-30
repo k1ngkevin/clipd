@@ -51,6 +51,7 @@ pub struct App<'a> {
     scroll_state: ScrollbarState,
     preview_state: bool,
     preview_scroll: u16,
+    preview_max_scroll: u16,
     colors: ClipboardColors,
 }
 
@@ -66,11 +67,16 @@ impl<'a> App<'a> {
             scroll_state: ScrollbarState::new(clipboard_len as usize * ITEM_HEIGHT),
             preview_state: false,
             preview_scroll: 0,
+            preview_max_scroll: 0,
             colors: ClipboardColors::new(&tailwind::BLUE),
         }
     }
 
     pub const fn next_row(&mut self) {
+        if self.items.len() == 0 {
+            return;
+        }
+
         let i = match self.state.selected() {
             Some(i) => {
                 if i >= self.items.len() - 1 {
@@ -86,6 +92,10 @@ impl<'a> App<'a> {
     }
 
     pub const fn previous_row(&mut self) {
+        if self.items.len() == 0 {
+            return;
+        }
+
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {
@@ -125,7 +135,9 @@ impl<'a> App<'a> {
     }
 
     pub fn preview_scroll_down(&mut self) {
-        self.preview_scroll = self.preview_scroll.saturating_add(1);
+        if self.preview_scroll < self.preview_max_scroll {
+            self.preview_scroll = self.preview_scroll.saturating_add(1);
+        }
     }
 
     pub fn preview_scroll_up(&mut self) {
@@ -254,15 +266,20 @@ impl<'a> App<'a> {
     fn render_item_preview(&mut self, frame: &mut Frame, area: Rect) {
         let idx = self.state.selected().expect("get item index");
         let item = self.items[idx].data.as_str();
-        let text = Paragraph::new(item)
-            .block(
-                Block::bordered()
-                    .border_type(BorderType::Rounded)
-                    .border_style(self.colors.selected_cell_style_fg)
-                    .title("item preview"),
-            )
-            .wrap(Wrap { trim: true })
-            .scroll((self.preview_scroll, 0));
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
+            .border_style(self.colors.selected_cell_style_fg)
+            .title("item preview");
+        let inner_area = block.inner(area);
+        let text = Paragraph::new(item).wrap(Wrap { trim: true });
+
+        let rendered_lines = text.line_count(inner_area.width);
+        self.preview_max_scroll = rendered_lines
+            .saturating_sub(inner_area.height as usize)
+            .min(u16::MAX as usize) as u16;
+        self.preview_scroll = self.preview_scroll.min(self.preview_max_scroll);
+
+        let text = text.block(block).scroll((self.preview_scroll, 0));
 
         frame.render_widget(text, area);
     }
