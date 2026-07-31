@@ -2,19 +2,28 @@ use crate::wayland::{
     ClipboardEntry, count_entries, delete_entry, list_entries, promote_entry, select_entry,
 };
 use crossterm::event::{self, KeyCode};
-use ratatui::style::palette::tailwind;
-use ratatui::{
-    DefaultTerminal, Frame,
-    layout::{Margin, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
+use nucleo_matcher::{
+    Config, Matcher,
+    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
 };
-
 use ratatui::widgets::{
     Block, BorderType, Cell, HighlightSpacing, Paragraph, Row, Scrollbar, ScrollbarOrientation,
     ScrollbarState, Table, TableState, Wrap,
 };
+use ratatui::{
+    DefaultTerminal, Frame,
+    crossterm::event::Event,
+    layout::{Margin, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span, Text},
+};
+use ratatui::{
+    layout::{Constraint, Layout},
+    style::palette::tailwind,
+};
 use rusqlite::Connection;
+use tui_input::Input;
+use tui_input::backend::crossterm::EventHandler;
 
 struct ClipboardColors {
     header_bg: Color,
@@ -39,9 +48,34 @@ impl ClipboardColors {
 const ITEM_HEIGHT: usize = 3;
 const MAX_ITEM_PREVIEW_LEN: usize = 50;
 
+#[derive(Debug, Clone, Copy)]
+struct SearchCandidate<'a> {
+    index: usize,
+    text: &'a str,
+}
+
+impl AsRef<str> for SearchCandidate<'_> {
+    fn as_ref(&self) -> &str {
+        self.text
+    }
+}
+
+#[derive(Default, Clone, Copy, PartialEq)]
+enum InputMode {
+    #[default]
+    Normal,
+    Editing,
+}
+
 pub struct App<'a> {
     connection: &'a Connection,
     items: Vec<ClipboardEntry>,
+    matches: Vec<usize>,
+    matcher: Matcher,
+
+    input: Input,
+    input_mode: InputMode,
+
     state: TableState,
     scroll_state: ScrollbarState,
     preview_state: bool,
@@ -54,10 +88,21 @@ impl<'a> App<'a> {
     pub fn new(conn: &'a Connection) -> Self {
         let clipboard_len = count_entries(conn).expect("number of clipboard entries");
         let clipboard_data = list_entries(&conn, clipboard_len);
+        let items = clipboard_data.expect("clipboard data");
+        let matches = (0..items.len()).collect();
+
+        let mut matcher_config = Config::DEFAULT;
+        matcher_config.prefer_prefix = true;
 
         Self {
             connection: conn,
-            items: clipboard_data.expect("clipboard data"),
+            items,
+            matches,
+            matcher: Matcher::new(matcher_config),
+
+            input: Input::new(String::new()),
+            input_mode: InputMode::default(),
+
             state: TableState::default().with_selected(0),
             scroll_state: ScrollbarState::new(clipboard_len as usize * ITEM_HEIGHT),
             preview_state: false,
@@ -105,8 +150,16 @@ impl<'a> App<'a> {
         self.scroll_state = self.scroll_state.position(i * ITEM_HEIGHT);
     }
 
+    fn selected_item_index(&self) -> Option<usize> {
+        let visible_index = self.state.selected()?;
+        self.matches.get(visible_index).copied()
+    }
+
     pub fn delete_row(&mut self) -> anyhow::Result<()> {
-        let idx = self.state.selected().expect("item index");
+        let idx = self
+            .selected_item_index()
+            .expect("selected clipboard entry");
+
         let id = self.items[idx].id;
 
         self.items.remove(idx);
@@ -116,7 +169,9 @@ impl<'a> App<'a> {
     }
 
     pub fn save_row_to_clipboard(&mut self) -> anyhow::Result<()> {
-        let idx = self.state.selected().expect("item index");
+        let idx = self
+            .selected_item_index()
+            .expect("selected clipboard entry");
 
         let id = self.items[idx].id;
         select_entry(self.connection, id)?;
@@ -137,6 +192,44 @@ impl<'a> App<'a> {
 
     pub fn preview_scroll_up(&mut self) {
         self.preview_scroll = self.preview_scroll.saturating_sub(1);
+    }
+
+    pub fn search_item(&mut self, query: &str) {
+        if query.trim().is_empty() {
+            self.matches = (0..self.items.len()).collect();
+            return;
+        }
+
+        let pattern = Pattern::new(
+            query,
+            CaseMatching::Ignore,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
+
+        let candidates = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| SearchCandidate {
+                index,
+                text: &item.data,
+            });
+
+        let ranked_matches = pattern.match_list(candidates, &mut self.matcher);
+
+        self.matches = ranked_matches
+            .into_iter()
+            .map(|(candidate, _score)| candidate.index)
+            .collect();
+    }
+
+    fn start_editing(&mut self) {
+        self.input_mode = InputMode::Editing
+    }
+
+    fn stop_editing(&mut self) {
+        self.input_mode = InputMode::Normal
     }
 
     pub fn run(mut self, terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
@@ -161,21 +254,41 @@ impl<'a> App<'a> {
                 }
             } else {
                 terminal.draw(|frame| self.render(frame))?;
+                let event = event::read()?;
 
-                if let Some(key) = event::read()?.as_key_press_event() {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        KeyCode::Char('j') | KeyCode::Down => self.next_row(),
-                        KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
-                        KeyCode::Enter => {
-                            self.save_row_to_clipboard()?;
-                            return Ok(());
-                        }
-                        KeyCode::Backspace => self.delete_row()?,
-                        KeyCode::Char(' ') => {
-                            self.preview_state = !self.preview_state;
-                        }
-                        _ => {}
+                if let Event::Key(key) = event {
+                    match self.input_mode {
+                        InputMode::Normal => match key.code {
+                            KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                            KeyCode::Char('j') | KeyCode::Down => self.next_row(),
+                            KeyCode::Char('k') | KeyCode::Up => self.previous_row(),
+                            KeyCode::Enter => {
+                                self.save_row_to_clipboard()?;
+                                return Ok(());
+                            }
+                            KeyCode::Backspace => self.delete_row()?,
+                            KeyCode::Char(' ') => {
+                                self.preview_state = !self.preview_state;
+                            }
+                            KeyCode::Char('/') => self.start_editing(),
+                            _ => {}
+                        },
+
+                        InputMode::Editing => match key.code {
+                            KeyCode::Enter => self.stop_editing(),
+                            KeyCode::Esc => self.stop_editing(),
+                            _ => {
+                                self.input.handle_event(&event);
+
+                                let query = self.input.value().to_owned();
+                                self.search_item(&query);
+
+                                self.state.select((!self.matches.is_empty()).then_some(0));
+
+                                self.scroll_state =
+                                    ScrollbarState::new(self.matches.len() * ITEM_HEIGHT)
+                            }
+                        },
                     }
                 }
             }
@@ -183,10 +296,36 @@ impl<'a> App<'a> {
     }
 
     fn render(&mut self, frame: &mut Frame) {
-        let area = frame.area();
+        if self.input_mode == InputMode::Normal {
+            let area = frame.area();
 
-        self.render_table(frame, area);
-        self.render_scrollbar(frame, area);
+            self.render_table(frame, area);
+            self.render_scrollbar(frame, area);
+        } else {
+            let [input_area, table_area] =
+                Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(frame.area());
+
+            self.render_input(frame, input_area);
+            self.render_table(frame, table_area);
+            self.render_scrollbar(frame, table_area);
+        }
+    }
+
+    fn render_input(&mut self, frame: &mut Frame, area: Rect) {
+        let width = area.width.max(3) - 3;
+        let scroll = self.input.visual_scroll(width as usize);
+
+        let input = Paragraph::new(self.input.value())
+            .style(Color::Green)
+            .scroll((0, 0))
+            .block(Block::bordered().title("search"));
+
+        frame.render_widget(input, area);
+
+        if self.input_mode == InputMode::Editing {
+            let x = self.input.visual_cursor().max(scroll) - scroll + 1;
+            frame.set_cursor_position((area.x + x as u16, area.y + 1));
+        }
     }
 
     fn render_table(&mut self, frame: &mut Frame, area: Rect) {
@@ -209,35 +348,40 @@ impl<'a> App<'a> {
             .style(header_style)
             .height(1);
 
-        let rows = self.items.iter().map(|entry| {
-            let mut entry_preview: String = entry
-                .data
-                .chars()
-                .take(MAX_ITEM_PREVIEW_LEN)
-                .collect::<String>()
-                .replace('\n', "\\n");
+        let rows = self
+            .matches
+            .iter()
+            .filter_map(|&index| self.items.get(index))
+            .map(|entry| {
+                let mut entry_preview: String = entry
+                    .data
+                    .chars()
+                    .take(MAX_ITEM_PREVIEW_LEN)
+                    .collect::<String>()
+                    .replace('\n', "\\n");
 
-            if entry.data.len() >= MAX_ITEM_PREVIEW_LEN {
-                entry_preview.replace_range(47..50, "...");
-            }
+                if entry.data.len() >= MAX_ITEM_PREVIEW_LEN {
+                    entry_preview
+                        .replace_range(MAX_ITEM_PREVIEW_LEN - 3..MAX_ITEM_PREVIEW_LEN, "...");
+                }
 
-            let content = Text::from(vec![
-                Line::from(entry_preview),
-                Line::from(Span::styled(
-                    entry.timestamp.to_string(),
-                    Style::new().fg(Color::DarkGray),
-                )),
-            ]);
+                let content = Text::from(vec![
+                    Line::from(entry_preview),
+                    Line::from(Span::styled(
+                        entry.timestamp.to_string(),
+                        Style::new().fg(Color::Gray),
+                    )),
+                ]);
 
-            Row::new([Cell::from(Text::from(content))])
-                .style(Style::new().fg(self.colors.row_fg))
-                .height(ITEM_HEIGHT as u16)
-        });
+                Row::new([Cell::from(Text::from(content))])
+                    .style(Style::new().fg(self.colors.row_fg))
+                    .height(ITEM_HEIGHT as u16)
+            });
 
         let footer_text = "↑/↓ up/down • ⤶ copy • ⌫ delete • ␣ preview";
         let footer = Row::new([footer_text]).top_margin(2);
 
-        let table = Table::new(rows, [50])
+        let table = Table::new(rows, [MAX_ITEM_PREVIEW_LEN as u16])
             .header(header)
             .row_highlight_style(selected_row_style)
             .column_highlight_style(selected_col_style)
@@ -263,7 +407,10 @@ impl<'a> App<'a> {
     }
 
     fn render_item_preview(&mut self, frame: &mut Frame, area: Rect) {
-        let idx = self.state.selected().expect("get item index");
+        let idx = self
+            .selected_item_index()
+            .expect("selected clipboard entry");
+
         let item = self.items[idx].data.as_str();
 
         let footer_text = "↑/↓ up/down • ␣ exit preview";
