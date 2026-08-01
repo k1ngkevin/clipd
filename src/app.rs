@@ -12,7 +12,6 @@ use ratatui::widgets::{
 };
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::Event,
     layout::{Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
@@ -156,19 +155,40 @@ impl<'a> App<'a> {
     }
 
     pub fn delete_row(&mut self) -> anyhow::Result<()> {
+        if self.matches.is_empty() {
+            return Ok(());
+        }
+
+        let selected_row = self.state.selected().unwrap_or_default();
         let idx = self
             .selected_item_index()
             .expect("selected clipboard entry");
 
         let id = self.items[idx].id;
 
-        self.items.remove(idx);
         delete_entry(self.connection, id)?;
+        self.items.remove(idx);
+        self.matches.retain(|&x| x != idx);
+        for matched_idx in &mut self.matches {
+            if *matched_idx > idx {
+                *matched_idx -= 1;
+            }
+        }
+
+        let selected_row =
+            (!self.matches.is_empty()).then(|| selected_row.min(self.matches.len() - 1));
+        self.state.select(selected_row);
+        self.scroll_state = ScrollbarState::new(self.matches.len() * ITEM_HEIGHT)
+            .position(selected_row.unwrap_or_default() * ITEM_HEIGHT);
 
         Ok(())
     }
 
     pub fn save_row_to_clipboard(&mut self) -> anyhow::Result<()> {
+        if self.matches.len() == 0 {
+            return Ok(());
+        }
+
         let idx = self
             .selected_item_index()
             .expect("selected clipboard entry");
@@ -256,7 +276,7 @@ impl<'a> App<'a> {
                 terminal.draw(|frame| self.render(frame))?;
                 let event = event::read()?;
 
-                if let Event::Key(key) = event {
+                if let Some(key) = event.as_key_press_event() {
                     match self.input_mode {
                         InputMode::Normal => match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
@@ -276,7 +296,7 @@ impl<'a> App<'a> {
 
                         InputMode::Editing => match key.code {
                             KeyCode::Enter => self.stop_editing(),
-                            KeyCode::Char('q') | KeyCode::Esc => {
+                            KeyCode::Esc => {
                                 self.stop_editing();
                                 self.input = "".into();
                                 self.state.select((!self.matches.is_empty()).then_some(0));
