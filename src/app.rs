@@ -113,13 +113,13 @@ impl<'a> App<'a> {
     }
 
     pub const fn next_row(&mut self) {
-        if self.items.len() == 0 {
+        if self.matches.len() == 0 {
             return;
         }
 
         let i = match self.state.selected() {
             Some(i) => {
-                if i >= self.items.len() - 1 {
+                if i >= self.matches.len() - 1 {
                     0
                 } else {
                     i + 1
@@ -132,14 +132,14 @@ impl<'a> App<'a> {
     }
 
     pub const fn previous_row(&mut self) {
-        if self.items.len() == 0 {
+        if self.matches.len() == 0 {
             return;
         }
 
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.items.len() - 1
+                    self.matches.len() - 1
                 } else {
                     i - 1
                 }
@@ -276,7 +276,14 @@ impl<'a> App<'a> {
 
                         InputMode::Editing => match key.code {
                             KeyCode::Enter => self.stop_editing(),
-                            KeyCode::Esc => self.stop_editing(),
+                            KeyCode::Char('q') | KeyCode::Esc => {
+                                self.stop_editing();
+                                self.input = "".into();
+                                self.state.select((!self.matches.is_empty()).then_some(0));
+                                self.matches = (0..self.items.len()).collect();
+                                self.scroll_state =
+                                    ScrollbarState::new(self.matches.len() * ITEM_HEIGHT);
+                            }
                             _ => {
                                 self.input.handle_event(&event);
 
@@ -284,7 +291,6 @@ impl<'a> App<'a> {
                                 self.search_item(&query);
 
                                 self.state.select((!self.matches.is_empty()).then_some(0));
-
                                 self.scroll_state =
                                     ScrollbarState::new(self.matches.len() * ITEM_HEIGHT)
                             }
