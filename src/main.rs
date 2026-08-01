@@ -43,7 +43,7 @@ enum Commands {
     /// Select item into current clipboard by id
     Select { id: i64 },
 
-    /// Delete stored clipabord item by id
+    /// Delete stored clipboard item by id
     Delete { id: i64 },
 
     /// Clear clipboard stored history
@@ -66,8 +66,8 @@ fn main() -> Result<()> {
         Some(Commands::Watch) => watch_clipboard(),
 
         Some(Commands::List { limit }) => {
-            let clipboard_entires = list_entries(&conn, limit)?;
-            for (i, entry) in clipboard_entires.iter().enumerate() {
+            let clipboard_entries = list_entries(&conn, limit)?;
+            for (i, entry) in clipboard_entries.iter().enumerate() {
                 println!(
                     "{}. [id {}] [timestamp {}]\n{}",
                     i + 1,

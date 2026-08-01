@@ -162,9 +162,9 @@ impl<'a> App<'a> {
         }
 
         let selected_row = self.state.selected().unwrap_or_default();
-        let idx = self
-            .selected_item_index()
-            .expect("selected clipboard entry");
+        let Some(idx) = self.selected_item_index() else {
+            return Ok(());
+        };
 
         let id = self.items[idx].id;
 
@@ -187,13 +187,13 @@ impl<'a> App<'a> {
     }
 
     pub fn save_row_to_clipboard(&mut self) -> anyhow::Result<()> {
-        if self.matches.len() == 0 {
+        if self.matches.is_empty() {
             return Ok(());
         }
 
-        let idx = self
-            .selected_item_index()
-            .expect("selected clipboard entry");
+        let Some(idx) = self.selected_item_index() else {
+            return Ok(());
+        };
 
         let id = self.items[idx].id;
         select_entry(self.connection, id)?;
@@ -214,6 +214,13 @@ impl<'a> App<'a> {
 
     pub fn preview_scroll_up(&mut self) {
         self.preview_scroll = self.preview_scroll.saturating_sub(1);
+    }
+
+    fn open_preview(&mut self) {
+        if self.selected_item_index().is_some() {
+            self.preview_state = true;
+            self.preview_scroll = 0;
+        }
     }
 
     pub fn search_item(&mut self, query: &str) {
@@ -269,7 +276,7 @@ impl<'a> App<'a> {
                             return Ok(());
                         }
                         KeyCode::Char(' ') => {
-                            self.preview_state = !self.preview_state;
+                            self.preview_state = false;
                         }
                         _ => {}
                     }
@@ -290,7 +297,7 @@ impl<'a> App<'a> {
                             }
                             KeyCode::Backspace => self.delete_row()?,
                             KeyCode::Char(' ') => {
-                                self.preview_state = !self.preview_state;
+                                self.open_preview();
                             }
                             KeyCode::Char('/') => self.start_editing(),
                             _ => {}
@@ -460,9 +467,11 @@ impl<'a> App<'a> {
     }
 
     fn render_item_preview(&mut self, frame: &mut Frame, area: Rect) {
-        let idx = self
-            .selected_item_index()
-            .expect("selected clipboard entry");
+        let Some(idx) = self.selected_item_index() else {
+            self.preview_state = false;
+            self.render(frame);
+            return;
+        };
 
         let item = self.items[idx].data.as_str();
 
@@ -491,6 +500,47 @@ impl<'a> App<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        conn.execute(
+            "CREATE TABLE clipd (
+                id INTEGER PRIMARY KEY,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                data TEXT NOT NULL,
+                timestamp TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+            )",
+            (),
+        )
+        .expect("create clipd table");
+        conn
+    }
+
+    #[test]
+    fn preview_stays_closed_when_database_is_empty() {
+        let conn = test_db();
+        let mut app = App::new(&conn);
+
+        app.open_preview();
+
+        assert!(!app.preview_state);
+    }
+
+    #[test]
+    fn preview_stays_closed_when_search_has_no_matches() {
+        let conn = test_db();
+        conn.execute(
+            "INSERT INTO clipd (sort_order, data) VALUES (1, 'clipboard entry')",
+            (),
+        )
+        .expect("insert clipboard entry");
+        let mut app = App::new(&conn);
+        app.search_item("does not match");
+
+        app.open_preview();
+
+        assert!(!app.preview_state);
+    }
 
     #[test]
     fn short_preview_unchanged() {
