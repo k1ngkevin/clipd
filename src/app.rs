@@ -333,6 +333,18 @@ impl<'a> App<'a> {
             .fg(self.colors.header_fg)
             .bg(self.colors.header_bg);
 
+        let count_text = match self.input_mode {
+            InputMode::Editing => format!("{} of {} items", self.matches.len(), self.items.len()),
+            InputMode::Normal => format!("{} items", self.matches.len()),
+        };
+
+        let header = Row::new([Cell::from(Text::from(vec![
+            Line::from("Clipboard History"),
+            Line::from(count_text),
+        ]))])
+        .style(header_style)
+        .height(2);
+
         let selected_row_style = Style::default().bg(self.colors.selected_cell_style_fg);
 
         let selected_col_style = Style::default().fg(self.colors.selected_column_style_fg);
@@ -340,13 +352,6 @@ impl<'a> App<'a> {
         let selected_cell_style = Style::default()
             .add_modifier(Modifier::REVERSED)
             .fg(self.colors.selected_cell_style_fg);
-
-        let header = ["Clipboard History"]
-            .into_iter()
-            .map(Cell::from)
-            .collect::<Row>()
-            .style(header_style)
-            .height(1);
 
         let rows = self
             .matches
@@ -378,7 +383,11 @@ impl<'a> App<'a> {
                     .height(ITEM_HEIGHT as u16)
             });
 
-        let footer_text = "↑/↓ up/down • ⤶ copy • ⌫ delete • ␣ preview";
+        let footer_text = match self.input_mode {
+            InputMode::Normal => "↑/↓ up/down • ⤶ copy • ⌫ delete • ␣ preview",
+            InputMode::Editing => "⤶ apply • esc cancel",
+        };
+
         let footer = Row::new([footer_text]).top_margin(2);
 
         let table = Table::new(rows, [MAX_ITEM_PREVIEW_LEN as u16])
