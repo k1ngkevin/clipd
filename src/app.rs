@@ -23,6 +23,8 @@ use ratatui::{
 use rusqlite::Connection;
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 struct ClipboardColors {
     header_bg: Color,
@@ -337,6 +339,32 @@ impl<'a> App<'a> {
         }
     }
 
+    pub fn generate_preview(entry: &str) -> String {
+        let entry = entry.replace('\n', "\\n");
+
+        let width = UnicodeWidthStr::width(entry.as_str());
+        if width <= MAX_ITEM_PREVIEW_LEN {
+            return entry;
+        }
+
+        let mut preview = String::new();
+        let avaliable_width: usize = MAX_ITEM_PREVIEW_LEN.saturating_sub(3);
+        let mut used_width: usize = 0;
+
+        for grapheme in entry.graphemes(true) {
+            let width = UnicodeWidthStr::width(grapheme);
+
+            if used_width + width > avaliable_width {
+                break;
+            }
+            preview.push_str(grapheme);
+            used_width += width;
+        }
+
+        preview.push_str("...");
+        preview
+    }
+
     fn render_input(&mut self, frame: &mut Frame, area: Rect) {
         let width = area.width.max(3) - 3;
         let scroll = self.input.visual_scroll(width as usize);
@@ -384,17 +412,7 @@ impl<'a> App<'a> {
             .iter()
             .filter_map(|&index| self.items.get(index))
             .map(|entry| {
-                let mut entry_preview: String = entry
-                    .data
-                    .chars()
-                    .take(MAX_ITEM_PREVIEW_LEN)
-                    .collect::<String>()
-                    .replace('\n', "\\n");
-
-                if entry.data.len() >= MAX_ITEM_PREVIEW_LEN {
-                    entry_preview
-                        .replace_range(MAX_ITEM_PREVIEW_LEN - 3..MAX_ITEM_PREVIEW_LEN, "...");
-                }
+                let entry_preview = App::generate_preview(&entry.data);
 
                 let content = Text::from(vec![
                     Line::from(entry_preview),
@@ -467,5 +485,37 @@ impl<'a> App<'a> {
         let text = text.block(block).scroll((self.preview_scroll, 0));
 
         frame.render_widget(text, area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_preview_unchanged() {
+        let preview = App::generate_preview("test");
+        assert_eq!(preview, "test");
+    }
+
+    #[test]
+    fn preview_escapes_newlines() {
+        let preview = App::generate_preview("hello\nworld");
+        assert_eq!(preview, "hello\\nworld");
+    }
+
+    #[test]
+    fn generate_preview_truncates_multibyte_chars() {
+        let test_str = format!("{}🇺🇸", "a".repeat(MAX_ITEM_PREVIEW_LEN - 1));
+
+        let expected = format!("{}...", "a".repeat(MAX_ITEM_PREVIEW_LEN - 3));
+
+        let preview = App::generate_preview(&test_str);
+
+        assert_eq!(preview, expected);
+        assert_eq!(
+            UnicodeWidthStr::width(preview.as_str()),
+            MAX_ITEM_PREVIEW_LEN
+        );
     }
 }

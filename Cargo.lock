@@ -240,6 +240,8 @@ dependencies = [
  "ratatui",
  "rusqlite",
  "tui-input",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]
