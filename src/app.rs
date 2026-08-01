@@ -308,7 +308,7 @@ impl<'a> App<'a> {
                             KeyCode::Esc => {
                                 self.stop_editing();
                                 self.input = "".into();
-                                self.state.select((!self.matches.is_empty()).then_some(0));
+                                self.state.select((!self.items.is_empty()).then_some(0));
                                 self.matches = (0..self.items.len()).collect();
                                 self.scroll_state =
                                     ScrollbarState::new(self.matches.len() * ITEM_HEIGHT);
@@ -319,7 +319,7 @@ impl<'a> App<'a> {
                                 let query = self.input.value().to_owned();
                                 self.search_item(&query);
 
-                                self.state.select((!self.matches.is_empty()).then_some(0));
+                                self.state.select((!self.items.is_empty()).then_some(0));
                                 self.scroll_state =
                                     ScrollbarState::new(self.matches.len() * ITEM_HEIGHT)
                             }
