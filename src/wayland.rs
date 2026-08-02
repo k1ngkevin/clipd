@@ -35,7 +35,31 @@ pub fn initialize_db(db_path: &str) -> Result<Connection> {
     Ok(conn)
 }
 
-pub fn store_entry(conn: &Connection, data: String) -> Result<i64> {
+pub fn is_duplicate(conn: &Connection, data: &str) -> anyhow::Result<Option<i64>> {
+    let duplicate_id: Option<i64> = conn
+        .query_row(
+            "
+        SELECT id FROM clipd
+        WHERE data = ?1
+        LIMIT 1
+    ",
+            params![data],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    if let Some(id) = duplicate_id {
+        promote_entry(conn, id)?;
+    }
+
+    Ok(duplicate_id)
+}
+
+pub fn store_entry(conn: &Connection, data: String) -> anyhow::Result<i64> {
+    if let Some(id) = is_duplicate(conn, &data)? {
+        return Ok(id);
+    }
+
     conn.execute(
         "INSERT INTO clipd 
         (sort_order, data) 
@@ -194,6 +218,29 @@ mod tests {
 
         assert_eq!(data, "hello world");
     }
+
+    #[test]
+    fn store_entry_prevents_duplicate_entries() {
+        let conn = test_db();
+
+        store_entry(&conn, "hello world".to_string()).expect("store entry");
+        store_entry(&conn, "hello world".to_string()).expect("store entry");
+
+        let db_entries = count_entries(&conn);
+        assert_eq!(db_entries, Ok(1));
+    }
+
+    #[test]
+    fn store_entry_allows_same_substring() {
+        let conn = test_db();
+
+        store_entry(&conn, "hello world".to_string()).expect("store entry");
+        store_entry(&conn, "hello world world".to_string()).expect("store entry");
+
+        let db_entries = count_entries(&conn);
+        assert_eq!(db_entries, Ok(2));
+    }
+
     #[test]
     fn store_entry_assigns_highest_sort_order() {
         let conn = test_db();
