@@ -4,11 +4,11 @@ pub mod wayland;
 use crate::wayland::{
     clear_db, delete_entry, initialize_db, list_entries, select_entry, store_entry, watch_clipboard,
 };
-use anyhow::{Context, Ok, Result};
+use anyhow::{Context, Result};
 use app::App;
 use clap::{Parser, Subcommand};
 use std::{
-    fs,
+    env, fs,
     io::{self, Read},
     os::unix::fs::PermissionsExt,
     path::PathBuf,
@@ -89,7 +89,24 @@ fn main() -> Result<()> {
                 }
             };
 
-            store_entry(&conn, content)?;
+            let clipboard_state = match env::var("CLIPBOARD_STATE") {
+                Ok(state) => Some(state),
+                Err(env::VarError::NotPresent) => None,
+                Err(env::VarError::NotUnicode(_)) => {
+                    eprintln!("clipboard state contains invalid Unicode");
+                    return Ok(());
+                }
+            };
+
+            if let Some(state) = clipboard_state.as_deref()
+                && !matches!(state, "data" | "nil" | "clear" | "sensitive")
+            {
+                eprintln!("unknown clipboard state: {state}");
+            }
+
+            if should_store_clipboard_state(clipboard_state.as_deref()) {
+                store_entry(&conn, content)?;
+            }
             Ok(())
         }
 
@@ -120,4 +137,26 @@ pub fn find_or_create_db() -> Result<PathBuf> {
     path.push("clipd_history.db");
 
     Ok(path)
+}
+
+fn should_store_clipboard_state(state: Option<&str>) -> bool {
+    matches!(state, None | Some("data"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_store_clipboard_state;
+
+    #[test]
+    fn stores_normal_and_manual_clipboard_content() {
+        assert!(should_store_clipboard_state(Some("data")));
+        assert!(should_store_clipboard_state(None));
+    }
+
+    #[test]
+    fn skips_non_data_clipboard_states() {
+        for state in ["nil", "clear", "sensitive", "future-state"] {
+            assert!(!should_store_clipboard_state(Some(state)));
+        }
+    }
 }

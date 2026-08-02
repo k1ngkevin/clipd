@@ -113,13 +113,20 @@ pub fn select_entry(conn: &Connection, id: i64) -> anyhow::Result<()> {
 
     let data = data.with_context(|| format!("no clipboard entry with id: {id}"))?;
 
-    let mut child = Command::new("wl-copy").stdin(Stdio::piped()).spawn()?;
+    let mut child = Command::new("wl-copy")
+        .arg("--sensitive")
+        .stdin(Stdio::piped())
+        .spawn()?;
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(data.as_bytes())?;
     }
 
-    child.wait()?;
+    let status = child.wait()?;
+    if !status.success() {
+        anyhow::bail!("wl-copy exited with status: {status}");
+    }
+
     Ok(())
 }
 
