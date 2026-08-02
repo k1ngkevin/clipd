@@ -122,21 +122,21 @@ fn main() -> Result<()> {
 }
 
 pub fn find_or_create_db() -> Result<PathBuf> {
-    let mut path = dirs::config_dir().context("error finding home directory")?;
-    path.push("clipd");
+    let mut state_path = dirs::state_dir().context("error finding state directory")?;
 
-    fs::create_dir_all(&path).context("failed to create clipboard database")?;
+    state_path.push("clipd");
 
-    if let Err(err) = fs::set_permissions(&path, fs::Permissions::from_mode(0o700)) {
+    fs::create_dir_all(&state_path).context("failed to create clipboard database")?;
+
+    if let Err(err) = fs::set_permissions(&state_path, fs::Permissions::from_mode(0o700)) {
         eprintln!(
             "failed to set 0700 permissions on database directory: {}",
             err
         );
     }
 
-    path.push("clipd_history.db");
-
-    Ok(path)
+    state_path.push("clipd_history.db");
+    Ok(state_path)
 }
 
 fn should_store_clipboard_state(state: Option<&str>) -> bool {
