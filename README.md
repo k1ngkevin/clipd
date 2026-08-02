@@ -135,11 +135,11 @@ Run `clipd --help` or `clipd <command> --help` for the complete CLI help.
 Clipboard history is stored as plaintext in:
 
 ```text
-$XDG_CONFIG_HOME/clipd/clipd_history.db
+$XDG_STATE_HOME/clipd/clipd_history.db
 ```
 
-When `XDG_CONFIG_HOME` is not set, this is typically
-`~/.config/clipd/clipd_history.db`. `clipd` attempts to set the directory to
+When `XDG_STATE_HOME` is not set, this is typically
+`~/.local/state/clipd/clipd_history.db`. `clipd` attempts to set the directory to
 mode `0700` and the database file to mode `0600`.
 
 ## Development
