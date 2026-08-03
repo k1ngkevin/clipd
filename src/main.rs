@@ -1,4 +1,5 @@
 pub mod app;
+pub mod config;
 pub mod wayland;
 
 use crate::wayland::{
@@ -7,6 +8,7 @@ use crate::wayland::{
 use anyhow::{Context, Result};
 use app::App;
 use clap::{Parser, Subcommand};
+use config::load_or_create_config;
 use std::{
     env, fs,
     io::{self, Read},
@@ -17,7 +19,7 @@ use std::{
 #[derive(Parser, Debug)]
 #[command(name = "clipd")]
 #[command(version = "0.1")]
-#[command(about = "clipboard manager gui for wayland", long_about = None)]
+#[command(about = "clipboard manager tui for wayland", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -51,6 +53,8 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
+    // let app_config = load_or_create_config()?;
+
     let db_path = find_or_create_db()?;
 
     let db_path = db_path
@@ -105,7 +109,8 @@ fn main() -> Result<()> {
             }
 
             if should_store_clipboard_state(clipboard_state.as_deref()) {
-                store_entry(&conn, content)?;
+                let app_config = load_or_create_config()?;
+                store_entry(&conn, content, app_config.storage)?;
             }
             Ok(())
         }

@@ -130,6 +130,40 @@ clipd clear
 
 Run `clipd --help` or `clipd <command> --help` for the complete CLI help.
 
+## Configuration
+
+`clipd` reads its configuration from:
+
+```text
+$XDG_CONFIG_HOME/clipd/config.json
+```
+
+When `XDG_CONFIG_HOME` is not set, this is typically
+`~/.config/clipd/config.json`. If the file does not exist, `clipd` creates it
+with the following defaults the first time it stores an entry:
+
+```json
+{
+  "storage": {
+    "allow_duplicates": false,
+    "max_history": 250,
+    "max_entry_bytes": 1000000
+  }
+}
+```
+
+The storage settings are:
+
+| Setting            | Description                                                    |
+| ------------------ | -------------------------------------------------------------- |
+| `allow_duplicates` | Store repeated clipboard content when set to `true`            |
+| `max_history`       | Maximum number of clipboard entries to retain                  |
+| `max_entry_bytes`   | Maximum UTF-8 size of one clipboard entry, measured in bytes   |
+
+All storage fields belong inside the `storage` object. Changes are read the
+next time an entry is stored, so a running watcher does not need to be
+restarted.
+
 ## Data and privacy
 
 Clipboard history is stored as plaintext in:

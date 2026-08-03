@@ -7,6 +7,8 @@ use std::{
     {env, fs},
 };
 
+use crate::config::StoreSettings;
+
 #[derive(Clone, Debug)]
 pub struct ClipboardEntry {
     pub id: i64,
@@ -55,9 +57,23 @@ pub fn is_duplicate(conn: &Connection, data: &str) -> anyhow::Result<Option<i64>
     Ok(duplicate_id)
 }
 
-pub fn store_entry(conn: &Connection, data: String) -> anyhow::Result<i64> {
-    if let Some(id) = is_duplicate(conn, &data)? {
-        return Ok(id);
+pub fn store_entry(
+    conn: &Connection,
+    data: String,
+    store_settings: StoreSettings,
+) -> anyhow::Result<i64> {
+    if !store_settings.allow_duplicates {
+        if let Some(id) = is_duplicate(conn, &data)? {
+            return Ok(id);
+        }
+    }
+
+    let entry_bytes = data.len();
+    if entry_bytes > store_settings.max_entry_bytes {
+        anyhow::bail!(
+            "clipboard entry is {entry_bytes} bytes. max is {} bytes",
+            store_settings.max_entry_bytes
+        )
     }
 
     conn.execute(
@@ -69,6 +85,22 @@ pub fn store_entry(conn: &Connection, data: String) -> anyhow::Result<i64> {
         )",
         params![data],
     )?;
+
+    let db_entries = count_entries(conn)?;
+    if db_entries >= store_settings.max_history as i64 {
+        conn.execute(
+            "
+        DELETE FROM clipd
+        WHERE id IN (
+            SELECT id
+            FROM clipd
+            ORDER BY sort_order DESC, id DESC
+            LIMIT -1 OFFSET ?1
+        )
+        ",
+            params![store_settings.max_history as i64],
+        )?;
+    }
 
     Ok(conn.last_insert_rowid())
 }
@@ -208,7 +240,8 @@ mod tests {
     #[test]
     fn store_entry_stores_data_and_returns_id() {
         let conn = test_db();
-        let id = store_entry(&conn, "hello world".to_string()).expect("store entry");
+        let id = store_entry(&conn, "hello world".to_string(), StoreSettings::default())
+            .expect("store entry");
 
         let data: String = conn
             .query_row("SELECT data FROM clipd WHERE id = ?1", params![id], |row| {
@@ -223,8 +256,10 @@ mod tests {
     fn store_entry_prevents_duplicate_entries() {
         let conn = test_db();
 
-        store_entry(&conn, "hello world".to_string()).expect("store entry");
-        store_entry(&conn, "hello world".to_string()).expect("store entry");
+        store_entry(&conn, "hello world".to_string(), StoreSettings::default())
+            .expect("store entry");
+        store_entry(&conn, "hello world".to_string(), StoreSettings::default())
+            .expect("store entry");
 
         let db_entries = count_entries(&conn);
         assert_eq!(db_entries, Ok(1));
@@ -234,8 +269,14 @@ mod tests {
     fn store_entry_allows_same_substring() {
         let conn = test_db();
 
-        store_entry(&conn, "hello world".to_string()).expect("store entry");
-        store_entry(&conn, "hello world world".to_string()).expect("store entry");
+        store_entry(&conn, "hello world".to_string(), StoreSettings::default())
+            .expect("store entry");
+        store_entry(
+            &conn,
+            "hello world world".to_string(),
+            StoreSettings::default(),
+        )
+        .expect("store entry");
 
         let db_entries = count_entries(&conn);
         assert_eq!(db_entries, Ok(2));
@@ -245,10 +286,12 @@ mod tests {
     fn store_entry_assigns_highest_sort_order() {
         let conn = test_db();
 
-        let first_id = store_entry(&conn, "first entry".to_string()).expect("stores first entry");
-        let second_id =
-            store_entry(&conn, "second entry".to_string()).expect("stores second entry");
-        let third_id = store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+        let first_id = store_entry(&conn, "first entry".to_string(), StoreSettings::default())
+            .expect("stores first entry");
+        let second_id = store_entry(&conn, "second entry".to_string(), StoreSettings::default())
+            .expect("stores second entry");
+        let third_id = store_entry(&conn, "third entry".to_string(), StoreSettings::default())
+            .expect("stores third entry");
 
         let first_order: i64 = conn
             .query_row(
@@ -280,13 +323,77 @@ mod tests {
     }
 
     #[test]
+    fn store_entry_respects_max_history_and_prunes() {
+        let conn = test_db();
+
+        let custom_settings = StoreSettings {
+            allow_duplicates: false,
+            max_entry_bytes: 1_000_000,
+            max_history: 2,
+        };
+
+        store_entry(&conn, "first entry".to_string(), custom_settings.clone())
+            .expect("stores first entry");
+        let second_id = store_entry(&conn, "second entry".to_string(), custom_settings.clone())
+            .expect("stores second entry");
+        let third_id = store_entry(&conn, "third entry".to_string(), custom_settings.clone())
+            .expect("stores third entry");
+
+        let db_entries = count_entries(&conn);
+        assert_eq!(db_entries, Ok(2));
+
+        let second_string: String = conn
+            .query_row("SELECT data FROM clipd WHERE id = ?1", [second_id], |row| {
+                row.get(0)
+            })
+            .expect("find sort_order using id");
+
+        let third_string: String = conn
+            .query_row("SELECT data FROM clipd WHERE id = ?1", [third_id], |row| {
+                row.get(0)
+            })
+            .expect("find sort_order using id");
+
+        assert_eq!(second_string, "second entry");
+        assert_eq!(third_string, "third entry");
+    }
+
+    #[test]
+    fn store_entry_respect_max_bytes() {
+        let conn = test_db();
+
+        let custom_settings = StoreSettings {
+            allow_duplicates: false,
+            max_entry_bytes: 10,
+            max_history: 100,
+        };
+
+        store_entry(&conn, "123456789".to_string(), custom_settings.clone())
+            .expect("insert 9 byte entry");
+        store_entry(&conn, "1234567890".to_string(), custom_settings.clone())
+            .expect("insert 10 byte entry");
+        let err = store_entry(&conn, "12345678901".to_string(), custom_settings.clone())
+            .expect_err("insert 11 entry should fail");
+
+        assert_eq!(
+            err.to_string(),
+            "clipboard entry is 11 bytes. max is 10 bytes"
+        );
+
+        let db_entries = count_entries(&conn);
+        assert_eq!(db_entries, Ok(2));
+    }
+
+    #[test]
     fn promote_entries_assigns_highest() {
         let conn = test_db();
 
-        let first_id = store_entry(&conn, "first entry".to_string()).expect("stores first entry");
-        let second_id =
-            store_entry(&conn, "second entry".to_string()).expect("stores second entry");
-        let third_id = store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+        let first_id = store_entry(&conn, "first entry".to_string(), StoreSettings::default())
+            .expect("stores first entry");
+        let second_id = store_entry(&conn, "second entry".to_string(), StoreSettings::default())
+            .expect("stores second entry");
+        let third_id = store_entry(&conn, "third entry".to_string(), StoreSettings::default())
+            .expect("stores third entry");
 
         promote_entry(&conn, first_id).expect("promotes entry");
 
@@ -323,9 +430,12 @@ mod tests {
     fn list_entries_returns_newest_first() {
         let conn = test_db();
 
-        store_entry(&conn, "first entry".to_string()).expect("stores first entry");
-        store_entry(&conn, "second entry".to_string()).expect("stores second entry");
-        store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+        store_entry(&conn, "first entry".to_string(), StoreSettings::default())
+            .expect("stores first entry");
+        store_entry(&conn, "second entry".to_string(), StoreSettings::default())
+            .expect("stores second entry");
+        store_entry(&conn, "third entry".to_string(), StoreSettings::default())
+            .expect("stores third entry");
 
         let entries = list_entries(&conn, 5).expect("list entries");
 
@@ -343,9 +453,12 @@ mod tests {
     fn list_entries_returns_highest_order() {
         let conn = test_db();
 
-        let first_id = store_entry(&conn, "first entry".to_string()).expect("stores first entry");
-        store_entry(&conn, "second entry".to_string()).expect("stores second entry");
-        store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+        let first_id = store_entry(&conn, "first entry".to_string(), StoreSettings::default())
+            .expect("stores first entry");
+        store_entry(&conn, "second entry".to_string(), StoreSettings::default())
+            .expect("stores second entry");
+        store_entry(&conn, "third entry".to_string(), StoreSettings::default())
+            .expect("stores third entry");
 
         promote_entry(&conn, first_id).expect("promotes entry");
 
@@ -361,9 +474,12 @@ mod tests {
     fn list_entries_respects_limit() {
         let conn = test_db();
 
-        store_entry(&conn, "first entry".to_string()).expect("stores first entry");
-        store_entry(&conn, "second entry".to_string()).expect("stores second entry");
-        store_entry(&conn, "third entry".to_string()).expect("stores third entry");
+        store_entry(&conn, "first entry".to_string(), StoreSettings::default())
+            .expect("stores first entry");
+        store_entry(&conn, "second entry".to_string(), StoreSettings::default())
+            .expect("stores second entry");
+        store_entry(&conn, "third entry".to_string(), StoreSettings::default())
+            .expect("stores third entry");
 
         let entries = list_entries(&conn, 2).expect("list entries");
 
@@ -380,7 +496,8 @@ mod tests {
         let conn = test_db();
         let data = vec!["blue", "red", "orange", "yellow", "purple"];
         for item in data.iter() {
-            store_entry(&conn, item.to_string()).expect("insert into database");
+            store_entry(&conn, item.to_string(), StoreSettings::default())
+                .expect("insert into database");
         }
 
         assert_eq!(
