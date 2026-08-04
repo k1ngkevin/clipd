@@ -53,7 +53,7 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    // let app_config = load_or_create_config()?;
+    let cli = Cli::parse();
 
     let db_path = find_or_create_db()?;
 
@@ -61,9 +61,7 @@ fn main() -> Result<()> {
         .to_str()
         .context("database path contains invalid UTF-8")?;
 
-    let conn = initialize_db(&db_path)?;
-
-    let cli = Cli::parse();
+    let conn = initialize_db(db_path)?;
 
     match cli.command {
         None => ratatui::run(|terminal| App::new(&conn).run(terminal)),

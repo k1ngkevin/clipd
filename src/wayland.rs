@@ -32,7 +32,7 @@ pub fn initialize_db(db_path: &str) -> Result<Connection> {
         (),
     )?;
 
-    if let Err(err) = fs::set_permissions(&db_path, fs::Permissions::from_mode(0o600)) {
+    if let Err(err) = fs::set_permissions(db_path, fs::Permissions::from_mode(0o600)) {
         eprintln!("failed to set 0600 permissions on database file: {}", err);
     }
 
@@ -64,10 +64,10 @@ pub fn store_entry(
     data: String,
     store_settings: StoreSettings,
 ) -> anyhow::Result<i64> {
-    if !store_settings.allow_duplicates {
-        if let Some(id) = is_duplicate(conn, &data)? {
-            return Ok(id);
-        }
+    if !store_settings.allow_duplicates
+        && let Some(id) = is_duplicate(conn, &data)?
+    {
+        return Ok(id);
     }
 
     let entry_bytes = data.len();

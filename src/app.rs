@@ -88,7 +88,7 @@ pub struct App<'a> {
 impl<'a> App<'a> {
     pub fn new(conn: &'a Connection) -> Self {
         let clipboard_len = count_entries(conn).expect("number of clipboard entries");
-        let clipboard_data = list_entries(&conn, clipboard_len);
+        let clipboard_data = list_entries(conn, clipboard_len);
         let items = clipboard_data.expect("clipboard data");
         let matches = (0..items.len()).collect();
 
@@ -114,7 +114,7 @@ impl<'a> App<'a> {
     }
 
     pub const fn next_row(&mut self) {
-        if self.matches.len() == 0 {
+        if self.matches.is_empty() {
             return;
         }
 
@@ -133,7 +133,7 @@ impl<'a> App<'a> {
     }
 
     pub const fn previous_row(&mut self) {
-        if self.matches.len() == 0 {
+        if self.matches.is_empty() {
             return;
         }
 
@@ -429,7 +429,7 @@ impl<'a> App<'a> {
                     )),
                 ]);
 
-                Row::new([Cell::from(Text::from(content))])
+                Row::new([Cell::from(content)])
                     .style(Style::new().fg(self.colors.row_fg))
                     .height(ITEM_HEIGHT as u16)
             });
