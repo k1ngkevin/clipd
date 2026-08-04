@@ -1,7 +1,7 @@
 use crate::wayland::{
     ClipboardEntry, count_entries, delete_entry, list_entries, promote_entry, select_entry,
 };
-use crossterm::event::{self, KeyCode};
+use crossterm::event::{self, KeyCode, KeyModifiers};
 use nucleo_matcher::{
     Config, Matcher,
     pattern::{AtomKind, CaseMatching, Normalization, Pattern},
@@ -267,6 +267,12 @@ impl<'a> App<'a> {
                 terminal.draw(|frame| self.render_item_preview(frame, frame.area()))?;
 
                 if let Some(key) = event::read()?.as_key_press_event() {
+                    if key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        return Ok(());
+                    }
+
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                         KeyCode::Char('j') | KeyCode::Down => self.preview_scroll_down(),
@@ -286,6 +292,12 @@ impl<'a> App<'a> {
                 let event = event::read()?;
 
                 if let Some(key) = event.as_key_press_event() {
+                    if key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        return Ok(());
+                    }
+
                     match self.input_mode {
                         InputMode::Normal => match key.code {
                             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),

@@ -18,7 +18,7 @@ use std::{
 
 #[derive(Parser, Debug)]
 #[command(name = "clipd")]
-#[command(version = "0.1")]
+#[command(version)]
 #[command(about = "clipboard manager tui for wayland", long_about = None)]
 struct Cli {
     #[command(subcommand)]
