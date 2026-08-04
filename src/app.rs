@@ -503,6 +503,8 @@ mod tests {
 
     fn test_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory database");
+        conn.pragma_update(None, "secure_delete", true)
+            .expect("turn on secure_delete");
         conn.execute(
             "CREATE TABLE clipd (
                 id INTEGER PRIMARY KEY,

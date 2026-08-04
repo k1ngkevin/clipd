@@ -18,9 +18,11 @@ pub struct ClipboardEntry {
 
 pub fn initialize_db(db_path: &str) -> Result<Connection> {
     let conn = Connection::open(db_path)?;
+    conn.pragma_update(None, "secure_delete", true)?;
 
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS clipd (
+        "
+        CREATE TABLE IF NOT EXISTS clipd (
         id INTEGER PRIMARY KEY,
         sort_order INTEGER NOT NULL DEFAULT 0,
         data TEXT NOT NULL,
@@ -224,6 +226,8 @@ mod tests {
 
     fn test_db() -> Connection {
         let conn = Connection::open_in_memory().expect("open in-memory database");
+        conn.pragma_update(None, "secure_delete", true)
+            .expect("turn on secure_delete");
         conn.execute(
             "CREATE TABLE clipd (
                 id INTEGER PRIMARY KEY,
